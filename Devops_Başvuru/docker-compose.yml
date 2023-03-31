@@ -1,0 +1,155 @@
+version: '3.8'
+services:
+  mongo:
+    container_name: mongo
+    image: mongo:5
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME = admin
+      - MONGO_INITDB_ROOT_PASSWORD = admin
+      - MONGO_INITDB_DATABASE=stajdb
+    volumes:
+      - ./database/mongo/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    ports:
+    - 27017:27017
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=90d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/proemtheus/consoles'
+      - '--web.enable-admin-api'
+    ports:
+      - '9090:9090'
+    depends_on:
+    - node_exporter
+
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: node_exporter
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: always
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning/:/etc/grafana/provisioning/
+    environment:
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`kartaca.localhost`) && Path(`/grafana`)"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    restart: always
+    depends_on:
+      - prometheus
+
+  pythonapp:
+    container_name: pythonapp
+    build: ./apps/pythonapp
+    ports:
+    - 4444:4444
+    labels:
+      - "traefik.http.routers.pythonapp.rule=(Host(`kartaca.localhost`) && Path(`/pythonapp`))"
+      - "traefik.http.middlewares.routepython.replacepath.path=/staj"
+      - "traefik.http.routers.pythonapp.middlewares=routepython"
+    environment:
+      CONNECTION_URI: "mongodb://mongo:27017"
+      DB_NAME: "stajdb"
+      COLLECTION_NAME: "iller"
+    depends_on:
+    - mongo
+    - traefik
+
+  traefik:
+    image: traefik:latest
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./monitoring/traefik:/etc/traefik
+    depends_on:
+    - grafana
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
+      - "--entrypoints.web.address=:80"
+    labels:
+      - "traefik.http.routers.traefik.rule=Host(`kartaca.localhost`)"
+      - "traefik.http.routers.traefik.entrypoints=web"
+
+
+
+  # mongo1:
+  #   container_name: mongo1
+  #   image: mongo:5
+  #   volumes:
+  #     - ./rs-init.sh:/scripts/rs-init.sh
+  #   ports:
+  #     - 27021:27017
+  #   links:
+  #     - mongo2
+  #     - mongo3
+  #   restart: always
+  #   entrypoint: [ "/usr/bin/mongod", "--bind_ip_all", "--replSet", "dbrs" ]
+  # mongo2:
+  #   container_name: mongo2
+  #   image: mongo:5
+  #   ports:
+  #     - 27022:27017
+  #   restart: always
+  #   entrypoint: [ "/usr/bin/mongod", "--bind_ip_all", "--replSet", "dbrs" ]
+  # mongo3:
+  #   container_name: mongo3
+  #   image: mongo:5
+  #   ports:
+  #     - 27023:27017
+  #   restart: always
+  #   entrypoint: [ "/usr/bin/mongod", "--bind_ip_all", "--replSet", "dbrs" ]
+
+  # init-mongo:
+  #   container_name: init-mongo
+  #   image: mongo:5
+  #   volumes:
+  #     - ./rs-init.sh:/docker-entrypoint-initdb.d/rs-init.sh
+  #     - ./mongo/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+  #   depends_on:
+  #     - mongo1
+  #     - mongo2
+  #     - mongo3
+  #   environment:
+  #     - MONGO_INITDB_DATABASE=stajdb
+  #     - MONGO_INITDB_ROOT_USERNAME = admin
+  #     - MONGO_INITDB_ROOT_PASSWORD = admin
+  #   restart: on-failure
+
