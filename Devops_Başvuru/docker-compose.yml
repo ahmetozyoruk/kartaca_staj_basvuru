@@ -73,15 +73,15 @@ services:
     depends_on:
       - prometheus
 
-  pythonapp:
-    container_name: pythonapp
-    build: ./apps/pythonapp
+  app:
+    container_name: app
+    build: ./apps/app
     ports:
     - 4444:4444
     labels:
-      - "traefik.http.routers.pythonapp.rule=(Host(`kartaca.localhost`) && Path(`/pythonapp`))"
+      - "traefik.http.routers.app.rule=(Host(`kartaca.localhost`) && Path(`/app`))"
       - "traefik.http.middlewares.routepython.replacepath.path=/staj"
-      - "traefik.http.routers.pythonapp.middlewares=routepython"
+      - "traefik.http.routers.app.middlewares=routepython"
     environment:
       CONNECTION_URI: "mongodb://mongo:27017"
       DB_NAME: "stajdb"
